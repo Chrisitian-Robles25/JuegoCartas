@@ -286,16 +286,21 @@ body {
 /* Mesa de juego */
 .game-table {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(7, 1fr);
+  /* Ampliado de 5 a 7 columnas */
   grid-template-rows: repeat(5, 1fr);
-  gap: 20px;
-  max-width: 600px;
+  gap: 15px;
+  /* Reducido gap para acomodar más columnas */
+  max-width: 800px;
+  /* Ampliado de 600px a 800px */
   width: 100%;
-  aspect-ratio: 1;
+  aspect-ratio: 1.4;
+  /* Cambiado para formato más ancho */
   margin: 20px auto;
   padding: 20px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(42, 28, 78, 0.3) 0%, transparent 70%);
+  border-radius: 30px;
+  /* Cambiado de circular a redondeado */
+  background: radial-gradient(ellipse, rgba(42, 28, 78, 0.3) 0%, transparent 70%);
   border: 3px solid var(--gold);
   box-shadow: var(--glow-md);
 }

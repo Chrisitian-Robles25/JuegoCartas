@@ -15,7 +15,8 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
   const [deck, setDeck] = useState([])
   const [shuffleAnimation, setShuffleAnimation] = useState(false)
   const [currentGroup, setCurrentGroup] = useState(0) // Grupo actual desde donde se toma la carta
-  const [revealedCard, setRevealedCard] = useState(null) // Carta actualmente revelada
+  const [revealedCard, setRevealedCard] = useState(null) // Carta actualmente revelada (sin afectar grupos)
+  const [revealingPosition, setRevealingPosition] = useState(null) // Posición de la carta siendo revelada
   const [revealingGroups, setRevealingGroups] = useState(new Set()) // Grupos en proceso de revelación
   const [orderedCards, setOrderedCards] = useState(Array.from({ length: 13 }, () => [])) // Cartas ordenadas por grupo
 
@@ -57,6 +58,7 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
     setCompletedGroups(new Set())
     setCurrentGroup(0) // Empezar desde el grupo central
     setRevealedCard(null)
+    setRevealingPosition(null)
     setRevealingGroups(new Set()) // Resetear grupos en revelación
     setOrderedCards(Array.from({ length: 13 }, () => [])) // Resetear cartas ordenadas
 
@@ -108,12 +110,15 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
   }
   // Lógica principal del juego automático
   useEffect(() => {
-    if (!isAutoPlaying || currentPhase !== 'playing') return
+    if (!isAutoPlaying || currentPhase !== 'playing') {
+      console.log('Efecto del juego cancelado - isAutoPlaying:', isAutoPlaying, 'currentPhase:', currentPhase)
+      return
+    }
 
     const playStep = async () => {
-      // Verificar antes de continuar que el juego sigue activo
+      // VERIFICACIÓN CRÍTICA: Detener inmediatamente si el juego ya no está activo
       if (currentPhase !== 'playing' || !isAutoPlaying) {
-        console.log('Juego detenido - Fase:', currentPhase, 'AutoPlaying:', isAutoPlaying)
+        console.log('Juego detenido en playStep - Fase:', currentPhase, 'AutoPlaying:', isAutoPlaying)
         return
       }
       // Verificar si el grupo actual tiene cartas
@@ -123,7 +128,48 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
         // Si el grupo actual está vacío, buscar el siguiente grupo con cartas
         let nextGroup = currentGroup
         let foundGroup = false
+        let totalCardsRemaining = 0
 
+        // Contar total de cartas restantes en todos los grupos
+        groups.forEach(group => {
+          totalCardsRemaining += group.length
+        })
+
+        if (totalCardsRemaining === 0) {
+          // No quedan cartas en ningún grupo - fin del juego
+          setIsAutoPlaying(false)
+          setCurrentPhase('finished')
+
+          // Verificar si todas las cartas están ordenadas correctamente
+          let allGroupsComplete = true
+          let totalOrderedCards = 0
+
+          orderedCards.forEach((orderedGroup, index) => {
+            totalOrderedCards += orderedGroup.length
+            if (orderedGroup.length < 4) {
+              allGroupsComplete = false
+            }
+          })
+
+          const won = allGroupsComplete && totalOrderedCards === 52
+
+          const finalMessage = won
+            ? '¡Felicidades! Has logrado el orden perfecto. La suerte te sonríe.'
+            : 'No tienes suerte hoy. Las cartas no encontraron su lugar.'
+
+          if (onGameEnd) {
+            onGameEnd({
+              success: won,
+              finalMessage: finalMessage,
+              steps: gameStep,
+              completedGroups: completedGroups.size,
+              reason: 'Sin más cartas para jugar'
+            })
+          }
+          return
+        }
+
+        // Buscar el siguiente grupo con cartas
         for (let i = 0; i < 13; i++) {
           nextGroup = (nextGroup + 1) % 13
           if (groups[nextGroup] && groups[nextGroup].length > 0) {
@@ -134,27 +180,20 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
         }
 
         if (!foundGroup) {
-          // No hay más cartas, verificar victoria
-          setCurrentPhase('checking')
-          const won = isGameWon(groups)
-          console.log('Juego terminado - Sin más cartas:', { won, groups })
+          // Esto no debería pasar si el conteo anterior es correcto
+          console.error('Error: No se encontró grupo con cartas pero totalCardsRemaining > 0')
+          setIsAutoPlaying(false)
+          setCurrentPhase('finished')
 
-          const finalMessage = won
-            ? 'Las cartas han revelado su orden perfecto. El destino sonríe.'
-            : 'El orden cósmico permanece oculto. Intenta nuevamente.'
-
-          setTimeout(() => {
-            setCurrentPhase('finished')
-            if (onGameEnd) {
-              onGameEnd({
-                success: won,
-                finalMessage: finalMessage,
-                steps: gameStep,
-                completedGroups: completedGroups.size,
-                reason: 'Sin más cartas'
-              })
-            }
-          }, 2000)
+          if (onGameEnd) {
+            onGameEnd({
+              success: false,
+              finalMessage: 'Error en el juego. No tienes suerte hoy.',
+              steps: gameStep,
+              completedGroups: completedGroups.size,
+              reason: 'Error: Sin grupos válidos'
+            })
+          }
         }
         return
       }
@@ -182,35 +221,27 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
         // BLOQUEO: El grupo ya tiene 3 cartas del valor correcto y la próxima carta es del mismo valor
         console.log(`BLOQUEO DETECTADO: Grupo ${targetGroupIndex} ya tiene ${cardsOfCorrectValue} cartas del valor ${expectedValue} y la próxima carta también es ${topCard.value}`)
 
-        // Revelar la carta problemática para mostrar por qué se bloquea
-        setRevealedCard(topCard)
-        setGroups(prevGroups => {
-          const newGroups = [...prevGroups]
-          const cardIndex = newGroups[currentGroup].length - 1
-          newGroups[currentGroup][cardIndex] = { ...topCard, faceUp: true }
-          return newGroups
-        })
+        // Revelar la carta problemática SOLO en el estado de revelación, sin modificar grupos
+        setRevealedCard({ ...topCard, faceUp: true })
+        setRevealingPosition({ groupIndex: currentGroup, cardIndex: currentGroupCards.length - 1 })
 
-        await new Promise(resolve => setTimeout(resolve, 2000))
+        await new Promise(resolve => setTimeout(resolve, 3000))
 
-        setCurrentPhase('checking')
-        const finalMessage = 'El camino se ha bloqueado. Las cartas revelan un destino incierto.'
-
-        setTimeout(() => {
-          setCurrentPhase('finished')
-          if (onGameEnd) {
-            onGameEnd({
-              success: false,
-              finalMessage: finalMessage,
-              steps: gameStep,
-              completedGroups: completedGroups.size,
-              reason: `Juego bloqueado: Grupo ${targetGroupIndex} tiene ${cardsOfCorrectValue} cartas del valor ${expectedValue}`
-            })
-          }
-        }, 2000)
-
-        // TERMINAR EL JUEGO INMEDIATAMENTE - NO CONTINUAR
+        // TERMINAR EL JUEGO INMEDIATAMENTE - DETECCIÓN DE DERROTA
         setIsAutoPlaying(false)
+        setCurrentPhase('finished')
+
+        const finalMessage = 'No tienes suerte hoy. El destino ha cerrado todos los caminos.'
+
+        if (onGameEnd) {
+          onGameEnd({
+            success: false,
+            finalMessage: finalMessage,
+            steps: gameStep,
+            completedGroups: completedGroups.size,
+            reason: `DERROTA: Grupo ${targetGroupIndex} bloqueado con ${cardsOfCorrectValue} cartas del valor ${expectedValue}`
+          })
+        }
         return
       }
 
@@ -219,19 +250,17 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
         return
       }
 
-      setRevealedCard(topCard)
+      // Revelar la carta SOLO en el estado de revelación, sin modificar grupos
+      setRevealedCard({ ...topCard, faceUp: true })
+      setRevealingPosition({ groupIndex: currentGroup, cardIndex: currentGroupCards.length - 1 })
 
       console.log(`Grupo ${currentGroup}: Tomando carta ${topCard.display} de ${topCard.suit} (carta ${currentGroupCards.length} de ${currentGroupCards.length})`)
 
-      // Voltear la carta (revelarla)
-      setGroups(prevGroups => {
-        const newGroups = [...prevGroups]
-        const cardIndex = newGroups[currentGroup].length - 1
-        newGroups[currentGroup][cardIndex] = { ...topCard, faceUp: true }
-        return newGroups
-      })
+      // Determinar si la carta va a su lugar correcto ANTES de revelarla
+      const isCardGoingToCorrectPlace = topCard.value === expectedValue
 
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      // Pausa para mostrar la carta revelada
+      await new Promise(resolve => setTimeout(resolve, 1500))
 
       console.log(`Moviendo carta ${topCard.display} de ${topCard.suit} del grupo ${currentGroup} al grupo ${targetGroupIndex}`)
 
@@ -239,18 +268,18 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
       setMovingCard(topCard)
       await new Promise(resolve => setTimeout(resolve, 1500))
 
-      // 4. Determinar si la carta va a su lugar correcto (ordenada)
-      const isCardGoingToCorrectPlace = topCard.value === expectedValue
-
-      // Remover la carta del grupo actual PRIMERO
-      setGroups(prevGroups => {
-        const newGroups = [...prevGroups]
-        newGroups[currentGroup] = newGroups[currentGroup].slice(0, -1)
-        return newGroups
-      })
+      // 4. Mover la carta según su destino
 
       if (isCardGoingToCorrectPlace) {
         // La carta va a su lugar correcto, agregarla a las cartas ordenadas
+
+        // OPERACIÓN ATÓMICA: Hacer todos los cambios a la vez para evitar duplicación
+        setGroups(prevGroups => {
+          const newGroups = [...prevGroups]
+          newGroups[currentGroup] = newGroups[currentGroup].slice(0, -1)
+          return newGroups
+        })
+
         setOrderedCards(prevOrdered => {
           const newOrdered = [...prevOrdered]
           newOrdered[targetGroupIndex] = [...newOrdered[targetGroupIndex], topCard]
@@ -261,6 +290,15 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
         console.log(`Carta ${topCard.display} colocada correctamente en grupo ${targetGroupIndex}`)
       } else {
         // La carta no va a su lugar correcto, agregarla al grupo normal
+
+        // Primero remover del grupo actual
+        setGroups(prevGroups => {
+          const newGroups = [...prevGroups]
+          newGroups[currentGroup] = newGroups[currentGroup].slice(0, -1)
+          return newGroups
+        })
+
+        // Luego agregar al grupo destino
         setGroups(prevGroups => {
           const newGroups = [...prevGroups]
           // Agregar al INICIO del grupo destino (abajo de la pila física)
@@ -273,22 +311,22 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
 
       setMovingCard(null)
       setRevealedCard(null)
+      setRevealingPosition(null)
       setGameStep(prev => prev + 1)
 
       // 5. NUEVA REGLA: Verificar si el grupo de destino está completo y ordenado
       if (isCardGoingToCorrectPlace) {
-        // Usar el estado actualizado de orderedCards
-        const currentOrderedCount = orderedCards[targetGroupIndex].length + 1 // +1 porque acabamos de agregar una
+        // Calcular el número actual de cartas ordenadas para este grupo
+        const currentOrderedCount = (orderedCards[targetGroupIndex]?.length || 0) + 1
 
         // Si el grupo tiene 4 cartas ordenadas, verificar si el grupo actual está vacío o sin cartas válidas
         if (currentOrderedCount === 4) {
           console.log(`Grupo ${targetGroupIndex} completado con 4 cartas ordenadas`)
 
-          // Verificar si el grupo de destino (que ahora es el activo) tiene más cartas para voltear
-          const updatedGroups = [...groups]
-          updatedGroups[currentGroup] = updatedGroups[currentGroup].slice(0, -1) // Ya removida arriba
+          // Verificar si quedan cartas en el grupo de destino para voltear
+          const groupAfterCardRemoval = groups[currentGroup].slice(0, -1)
 
-          if (updatedGroups[targetGroupIndex].length === 0) {
+          if (groupAfterCardRemoval.length === 0) {
             // El grupo de destino no tiene más cartas, el juego puede terminar
             console.log(`VICTORIA: Grupo ${targetGroupIndex} completado y sin más cartas para voltear`)
 
@@ -344,35 +382,39 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
       }, 800)
     }
 
-    const timer = setTimeout(playStep, 2000)
-    return () => clearTimeout(timer)
+    // Solo ejecutar el próximo paso si el juego sigue activo
+    if (currentPhase === 'playing' && isAutoPlaying) {
+      const timer = setTimeout(playStep, 2000)
+      return () => clearTimeout(timer)
+    }
   }, [isAutoPlaying, groups, gameStep, currentPhase, currentGroup, onGameEnd])
 
-  // Posiciones de los grupos en círculo
+  // Posiciones de los grupos en círculo (con más separación horizontal)
   const getGroupPosition = (index) => {
     if (index === 0) {
       // Grupo central (Rey/13)
       return {
-        gridColumn: '3',
+        gridColumn: '4', // Centrado en grid de 7 columnas
         gridRow: '3',
         transform: 'scale(1.1)'
       }
     }
 
-    // Posiciones circulares para grupos 1-12
+    // Posiciones circulares para grupos 1-12 (más separados horizontalmente)
     const positions = [
       null, // índice 0 ya manejado
-      { gridColumn: '3', gridRow: '1' }, // 12 o'clock
-      { gridColumn: '4', gridRow: '1' }, // 1 o'clock
-      { gridColumn: '5', gridRow: '2' }, // 2 o'clock
-      { gridColumn: '5', gridRow: '3' }, // 3 o'clock
-      { gridColumn: '5', gridRow: '4' }, // 4 o'clock
-      { gridColumn: '4', gridRow: '5' }, // 5 o'clock
-      { gridColumn: '3', gridRow: '5' }, // 6 o'clock
-      { gridColumn: '2', gridRow: '5' }, // 7 o'clock
-      { gridColumn: '1', gridRow: '4' }, // 8 o'clock
-      { gridColumn: '1', gridRow: '3' }, // 9 o'clock
-      { gridColumn: '1', gridRow: '2' }, // 10 o'clock
+      { gridColumn: '4', gridRow: '1' }, // 12 o'clock (arriba centro)
+      { gridColumn: '5', gridRow: '1' }, // 1 o'clock
+      { gridColumn: '6', gridRow: '2' }, // 2 o'clock (más a la derecha)
+      { gridColumn: '7', gridRow: '3' }, // 3 o'clock (extremo derecho)
+      { gridColumn: '6', gridRow: '4' }, // 4 o'clock (más a la derecha)
+      { gridColumn: '5', gridRow: '5' }, // 5 o'clock
+      { gridColumn: '4', gridRow: '5' }, // 6 o'clock (abajo centro)
+      { gridColumn: '3', gridRow: '5' }, // 7 o'clock
+      { gridColumn: '2', gridRow: '4' }, // 8 o'clock (más a la izquierda)
+      { gridColumn: '1', gridRow: '3' }, // 9 o'clock (extremo izquierdo)
+      { gridColumn: '2', gridRow: '2' }, // 10 o'clock (más a la izquierda)
+      { gridColumn: '3', gridRow: '1' }, // 11 o'clock
       { gridColumn: '2', gridRow: '1' }, // 11 o'clock
     ]
 
@@ -584,30 +626,6 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
         </motion.button>
       )}
 
-      {/* Información del juego */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        style={{
-          position: 'fixed',
-          top: '20px',
-          left: '20px',
-          background: 'rgba(0, 0, 0, 0.8)',
-          padding: '15px',
-          borderRadius: '10px',
-          border: '1px solid var(--gold)',
-          color: 'var(--gold)',
-          fontSize: '14px',
-          zIndex: 100
-        }}
-      >
-        <div>Pregunta: &quot;{playerQuestion}&quot;</div>
-        <div>Paso: {gameStep}</div>
-        <div>Grupo actual: {currentGroup === 0 ? 'K' : currentGroup === 1 ? 'A' : currentGroup}</div>
-        <div>Grupos completos: {completedGroups.size}/13</div>
-        <div>Fase: {currentPhase}</div>
-      </motion.div>
-
       {/* Mazo durante barajado y distribución */}
       {(currentPhase === 'shuffling' || currentPhase === 'distributing') && (
         <motion.div
@@ -685,6 +703,62 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
             {groups.map((group, index) => renderGroup(group, index))}
           </div>
         </div>
+      )}
+
+      {/* Carta revelada como superposición */}
+      {revealedCard && revealingPosition && (
+        <motion.div
+          style={{
+            position: 'fixed',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            zIndex: 1000,
+            background: 'rgba(0, 0, 0, 0.8)',
+            padding: '20px',
+            borderRadius: '15px',
+            border: '2px solid var(--gold)',
+            boxShadow: '0 0 30px var(--gold)'
+          }}
+          initial={{ opacity: 0, scale: 0.5, rotateY: 180 }}
+          animate={{
+            opacity: 1,
+            scale: 1.2,
+            rotateY: 0,
+            boxShadow: [
+              '0 0 30px var(--gold)',
+              '0 0 50px var(--gold)',
+              '0 0 30px var(--gold)'
+            ]
+          }}
+          transition={{
+            duration: 0.8,
+            boxShadow: {
+              duration: 1,
+              repeat: Infinity,
+              ease: "easeInOut"
+            }
+          }}
+        >
+          <Card
+            card={revealedCard}
+            isFlipped={true}
+            className="revealed-card"
+          />
+          <motion.div
+            style={{
+              textAlign: 'center',
+              marginTop: '10px',
+              color: 'var(--gold)',
+              fontSize: '16px',
+              fontFamily: 'var(--font-decorative)'
+            }}
+            animate={{ opacity: [0.7, 1, 0.7] }}
+            transition={{ duration: 1, repeat: Infinity }}
+          >
+            Carta Revelada
+          </motion.div>
+        </motion.div>
       )}
 
       {/* Indicador de progreso */}
