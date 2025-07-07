@@ -12,6 +12,8 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
   const [gameStep, setGameStep] = useState(0)
   const [isAutoPlaying, setIsAutoPlaying] = useState(false)
   const [completedGroups, setCompletedGroups] = useState(new Set())
+  const [deck, setDeck] = useState([])
+  const [shuffleAnimation, setShuffleAnimation] = useState(false)
 
   // Inicializar el juego
   useEffect(() => {
@@ -20,24 +22,46 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
 
   const startGame = async () => {
     setCurrentPhase('shuffling')
+    setGameStep(0)
+    setCompletedGroups(new Set())
 
-    // 1. Crear y barajar el mazo
+    // 1. Crear el mazo inicial y mostrarlo
     const newDeck = createDeck()
-    await new Promise(resolve => setTimeout(resolve, 2000)) // Animación de barajado
+    setDeck(newDeck)
 
-    const shuffledDeck = casinoShuffle(newDeck)
-
-    setCurrentPhase('distributing')
+    // Mostrar el mazo inicial por un momento
     await new Promise(resolve => setTimeout(resolve, 1000))
 
-    // 2. Distribuir cartas en 13 grupos
-    const distributedGroups = distributeCards(shuffledDeck)
-    setGroups(distributedGroups)
-
+    // 2. Animación de barajado (riffle shuffle)
+    setShuffleAnimation(true)
     await new Promise(resolve => setTimeout(resolve, 2000))
+
+    // 3. Barajar el mazo
+    const shuffledDeck = casinoShuffle(newDeck)
+    setDeck(shuffledDeck)
+    setShuffleAnimation(false)
+
+    await new Promise(resolve => setTimeout(resolve, 1000))
+
+    setCurrentPhase('distributing')
+
+    // 4. Distribuir cartas gradualmente
+    const distributedGroups = distributeCards(shuffledDeck)
+
+    // Animar la distribución carta por carta
+    for (let i = 0; i < 13; i++) {
+      setGroups(prevGroups => {
+        const newGroups = [...prevGroups]
+        newGroups[i] = distributedGroups[i]
+        return newGroups
+      })
+      await new Promise(resolve => setTimeout(resolve, 300))
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 1000))
     setCurrentPhase('playing')
 
-    // 3. Comenzar el juego automático
+    // 5. Comenzar el juego automático
     setTimeout(() => {
       setIsAutoPlaying(true)
     }, 1000)
@@ -92,7 +116,7 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
       }
 
       // Animar el movimiento
-      await new Promise(resolve => setTimeout(resolve, 800))
+      await new Promise(resolve => setTimeout(resolve, 1500))
 
       // Mover la carta
       setGroups(prevGroups => {
@@ -128,7 +152,7 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
       // Continuar con el siguiente paso después de una pausa
       setTimeout(() => {
         // Si el juego ha durado mucho, terminar automáticamente
-        if (gameStep > 150) {
+        if (gameStep > 100) {
           setCurrentPhase('checking')
 
           const won = isGameWon(groups)
@@ -148,10 +172,10 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
             }
           }, 2000)
         }
-      }, 1000)
+      }, 800)
     }
 
-    const timer = setTimeout(playStep, 1500)
+    const timer = setTimeout(playStep, 2000)
     return () => clearTimeout(timer)
   }, [isAutoPlaying, groups, gameStep, currentPhase, onGameEnd, completedGroups.size])
 
@@ -237,18 +261,42 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
         </motion.div>
 
         {/* Cartas del grupo */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+        <div style={{
+          display: 'flex',
+          flexDirection: isCompleted ? 'row' : 'column',
+          gap: isCompleted ? '5px' : '2px',
+          position: 'relative',
+          minHeight: '40px',
+          flexWrap: 'wrap',
+          justifyContent: 'center'
+        }}>
           {group.map((card, cardIndex) => (
-            <Card
+            <motion.div
               key={`${card.id}-${cardIndex}`}
-              card={card}
-              isFlipped={true}
-              className={movingCard?.id === card.id ? 'moving' : ''}
               style={{
+                position: isCompleted ? 'relative' : 'absolute',
+                top: isCompleted ? '0px' : `${cardIndex * -3}px`,
                 zIndex: cardIndex + 1,
-                transform: `translateY(${cardIndex * -15}px)`
               }}
-            />
+              initial={{ opacity: 0, y: -50 }}
+              animate={{
+                opacity: 1,
+                y: 0,
+                scale: movingCard?.id === card.id ? 1.2 : (isCompleted ? 0.8 : 1),
+                rotateY: isCompleted ? [0, 360, 0] : 0
+              }}
+              transition={{
+                delay: cardIndex * 0.1,
+                duration: movingCard?.id === card.id ? 0.8 : 0.3,
+                rotateY: { duration: 2, delay: cardIndex * 0.2 }
+              }}
+            >
+              <Card
+                card={card}
+                isFlipped={true}
+                className={movingCard?.id === card.id ? 'moving' : ''}
+              />
+            </motion.div>
           ))}
         </div>
 
@@ -319,17 +367,84 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
         <div>Fase: {currentPhase}</div>
       </motion.div>
 
+      {/* Mazo durante barajado y distribución */}
+      {(currentPhase === 'shuffling' || currentPhase === 'distributing') && (
+        <motion.div
+          style={{
+            position: 'fixed',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
+            zIndex: 200
+          }}
+          initial={{ opacity: 0, scale: 0 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0 }}
+        >
+          {/* Pila de cartas del mazo */}
+          <div style={{ position: 'relative', width: '80px', height: '120px' }}>
+            {deck.slice(0, 10).map((card, index) => (
+              <motion.div
+                key={`deck-${card.id}`}
+                style={{
+                  position: 'absolute',
+                  width: '80px',
+                  height: '120px',
+                  background: 'linear-gradient(135deg, #1a0b2e 0%, #2d1b4e 100%)',
+                  border: '2px solid var(--gold)',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--gold)',
+                  fontSize: '24px',
+                  transform: `translateY(${index * -2}px) rotate(${shuffleAnimation ? Math.sin(Date.now() / 1000 + index) * 10 : 0}deg)`,
+                  boxShadow: '0 4px 8px rgba(0,0,0,0.3)'
+                }}
+                animate={shuffleAnimation ? {
+                  x: [0, Math.sin(index) * 20, 0],
+                  rotate: [0, Math.sin(index) * 15, 0]
+                } : {}}
+                transition={{
+                  duration: 0.5,
+                  repeat: shuffleAnimation ? Infinity : 0,
+                  ease: "easeInOut"
+                }}
+              >
+                🂠
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Texto de estado */}
+          <motion.div
+            style={{
+              textAlign: 'center',
+              marginTop: '20px',
+              color: 'var(--gold)',
+              fontSize: '18px',
+              fontFamily: 'var(--font-decorative)'
+            }}
+          >
+            {currentPhase === 'shuffling' && 'Barajando...'}
+            {currentPhase === 'distributing' && 'Distribuyendo cartas...'}
+          </motion.div>
+        </motion.div>
+      )}
+
       {/* Mesa de juego */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: '100vh'
-      }}>
-        <div className="game-table">
-          {groups.map((group, index) => renderGroup(group, index))}
+      {currentPhase === 'playing' && (
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '100vh'
+        }}>
+          <div className="game-table">
+            {groups.map((group, index) => renderGroup(group, index))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Indicador de progreso */}
       <motion.div
