@@ -16,6 +16,36 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
   const [shuffleAnimation, setShuffleAnimation] = useState(false)
   const [currentGroup, setCurrentGroup] = useState(0) // Grupo actual desde donde se toma la carta
   const [revealedCard, setRevealedCard] = useState(null) // Carta actualmente revelada
+  const [revealingGroups, setRevealingGroups] = useState(new Set()) // Grupos en proceso de revelación
+  const [orderedCards, setOrderedCards] = useState(Array.from({ length: 13 }, () => [])) // Cartas ordenadas por grupo
+
+  // Función para revelar todas las cartas de un grupo completado
+  const revealCompletedGroup = async (groupIndex) => {
+    if (revealingGroups.has(groupIndex)) return
+
+    setRevealingGroups(prev => new Set([...prev, groupIndex]))
+
+    // Revelar cartas una por una con animación
+    for (let i = 0; i < groups[groupIndex].length; i++) {
+      setGroups(prevGroups => {
+        const newGroups = [...prevGroups]
+        if (newGroups[groupIndex][i]) {
+          newGroups[groupIndex][i] = { ...newGroups[groupIndex][i], faceUp: true }
+        }
+        return newGroups
+      })
+      await new Promise(resolve => setTimeout(resolve, 200))
+    }
+
+    // Después de 3 segundos, quitar de la lista de revelación para mostrar en abanico
+    setTimeout(() => {
+      setRevealingGroups(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(groupIndex)
+        return newSet
+      })
+    }, 3000)
+  }
 
   // Inicializar el juego
   useEffect(() => {
@@ -27,6 +57,8 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
     setCompletedGroups(new Set())
     setCurrentGroup(0) // Empezar desde el grupo central
     setRevealedCard(null)
+    setRevealingGroups(new Set()) // Resetear grupos en revelación
+    setOrderedCards(Array.from({ length: 13 }, () => [])) // Resetear cartas ordenadas
 
     // 1. Crear el mazo inicial y mostrarlo
     const newDeck = createDeck()
@@ -74,12 +106,16 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
       setIsAutoPlaying(true)
     }, 1000)
   }
-
   // Lógica principal del juego automático
   useEffect(() => {
     if (!isAutoPlaying || currentPhase !== 'playing') return
 
     const playStep = async () => {
+      // Verificar antes de continuar que el juego sigue activo
+      if (currentPhase !== 'playing' || !isAutoPlaying) {
+        console.log('Juego detenido - Fase:', currentPhase, 'AutoPlaying:', isAutoPlaying)
+        return
+      }
       // Verificar si el grupo actual tiene cartas
       const currentGroupCards = groups[currentGroup]
 
@@ -101,7 +137,7 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
           // No hay más cartas, verificar victoria
           setCurrentPhase('checking')
           const won = isGameWon(groups)
-          console.log('Juego terminado:', { won, groups })
+          console.log('Juego terminado - Sin más cartas:', { won, groups })
 
           const finalMessage = won
             ? 'Las cartas han revelado su orden perfecto. El destino sonríe.'
@@ -114,7 +150,8 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
                 success: won,
                 finalMessage: finalMessage,
                 steps: gameStep,
-                completedGroups: completedGroups.size
+                completedGroups: completedGroups.size,
+                reason: 'Sin más cartas'
               })
             }
           }, 2000)
@@ -124,7 +161,67 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
 
       // 1. Revelar la carta superior del grupo actual
       const topCard = currentGroupCards[currentGroupCards.length - 1]
+
+      // VERIFICAR REGLA DE BLOQUEO ANTES DE REVELAR
+      // Determinar el grupo de destino de esta carta
+      let targetGroupIndex
+      if (topCard.value === 13) {
+        targetGroupIndex = 0 // Rey va al grupo central (índice 0)
+      } else if (topCard.value === 1) {
+        targetGroupIndex = 1 // As va al grupo 1
+      } else {
+        targetGroupIndex = topCard.value // Otros van a su número correspondiente
+      }
+
+      // Verificar si el grupo de destino ya tiene 3 cartas del valor correcto
+      const targetGroup = groups[targetGroupIndex]
+      const expectedValue = targetGroupIndex === 0 ? 13 : targetGroupIndex
+      const cardsOfCorrectValue = targetGroup.filter(card => card.value === expectedValue).length
+
+      if (cardsOfCorrectValue >= 3 && topCard.value === expectedValue) {
+        // BLOQUEO: El grupo ya tiene 3 cartas del valor correcto y la próxima carta es del mismo valor
+        console.log(`BLOQUEO DETECTADO: Grupo ${targetGroupIndex} ya tiene ${cardsOfCorrectValue} cartas del valor ${expectedValue} y la próxima carta también es ${topCard.value}`)
+
+        // Revelar la carta problemática para mostrar por qué se bloquea
+        setRevealedCard(topCard)
+        setGroups(prevGroups => {
+          const newGroups = [...prevGroups]
+          const cardIndex = newGroups[currentGroup].length - 1
+          newGroups[currentGroup][cardIndex] = { ...topCard, faceUp: true }
+          return newGroups
+        })
+
+        await new Promise(resolve => setTimeout(resolve, 2000))
+
+        setCurrentPhase('checking')
+        const finalMessage = 'El camino se ha bloqueado. Las cartas revelan un destino incierto.'
+
+        setTimeout(() => {
+          setCurrentPhase('finished')
+          if (onGameEnd) {
+            onGameEnd({
+              success: false,
+              finalMessage: finalMessage,
+              steps: gameStep,
+              completedGroups: completedGroups.size,
+              reason: `Juego bloqueado: Grupo ${targetGroupIndex} tiene ${cardsOfCorrectValue} cartas del valor ${expectedValue}`
+            })
+          }
+        }, 2000)
+
+        // TERMINAR EL JUEGO INMEDIATAMENTE - NO CONTINUAR
+        setIsAutoPlaying(false)
+        return
+      }
+
+      // Solo continuar si el juego sigue activo
+      if (currentPhase !== 'playing' || !isAutoPlaying) {
+        return
+      }
+
       setRevealedCard(topCard)
+
+      console.log(`Grupo ${currentGroup}: Tomando carta ${topCard.display} de ${topCard.suit} (carta ${currentGroupCards.length} de ${currentGroupCards.length})`)
 
       // Voltear la carta (revelarla)
       setGroups(prevGroups => {
@@ -136,40 +233,87 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
 
       await new Promise(resolve => setTimeout(resolve, 1000))
 
-      // 2. Determinar el grupo de destino
-      let targetGroupIndex
-      if (topCard.value === 13) {
-        targetGroupIndex = 0 // Rey va al grupo central (índice 0)
-      } else if (topCard.value === 1) {
-        targetGroupIndex = 1 // As va al grupo 1
-      } else {
-        targetGroupIndex = topCard.value // Otros van a su número correspondiente
-      }
-
       console.log(`Moviendo carta ${topCard.display} de ${topCard.suit} del grupo ${currentGroup} al grupo ${targetGroupIndex}`)
 
       // 3. Marcar la carta como en movimiento
       setMovingCard(topCard)
       await new Promise(resolve => setTimeout(resolve, 1500))
 
-      // 4. Mover la carta al final del grupo destino (abajo de la pila)
+      // 4. Determinar si la carta va a su lugar correcto (ordenada)
+      const isCardGoingToCorrectPlace = topCard.value === expectedValue
+
+      // Remover la carta del grupo actual PRIMERO
       setGroups(prevGroups => {
         const newGroups = [...prevGroups]
-
-        // Remover del grupo actual
         newGroups[currentGroup] = newGroups[currentGroup].slice(0, -1)
-
-        // Agregar al final del grupo destino (abajo de la pila)
-        newGroups[targetGroupIndex] = [...newGroups[targetGroupIndex], topCard]
-
         return newGroups
       })
+
+      if (isCardGoingToCorrectPlace) {
+        // La carta va a su lugar correcto, agregarla a las cartas ordenadas
+        setOrderedCards(prevOrdered => {
+          const newOrdered = [...prevOrdered]
+          newOrdered[targetGroupIndex] = [...newOrdered[targetGroupIndex], topCard]
+          console.log(`Cartas ordenadas en grupo ${targetGroupIndex}:`, newOrdered[targetGroupIndex].length, 'de 4')
+          return newOrdered
+        })
+
+        console.log(`Carta ${topCard.display} colocada correctamente en grupo ${targetGroupIndex}`)
+      } else {
+        // La carta no va a su lugar correcto, agregarla al grupo normal
+        setGroups(prevGroups => {
+          const newGroups = [...prevGroups]
+          // Agregar al INICIO del grupo destino (abajo de la pila física)
+          newGroups[targetGroupIndex] = [topCard, ...newGroups[targetGroupIndex]]
+          return newGroups
+        })
+
+        console.log(`Carta ${topCard.display} colocada temporalmente en grupo ${targetGroupIndex}`)
+      }
 
       setMovingCard(null)
       setRevealedCard(null)
       setGameStep(prev => prev + 1)
 
-      // 5. Cambiar al grupo de destino para la siguiente iteración
+      // 5. NUEVA REGLA: Verificar si el grupo de destino está completo y ordenado
+      if (isCardGoingToCorrectPlace) {
+        // Usar el estado actualizado de orderedCards
+        const currentOrderedCount = orderedCards[targetGroupIndex].length + 1 // +1 porque acabamos de agregar una
+
+        // Si el grupo tiene 4 cartas ordenadas, verificar si el grupo actual está vacío o sin cartas válidas
+        if (currentOrderedCount === 4) {
+          console.log(`Grupo ${targetGroupIndex} completado con 4 cartas ordenadas`)
+
+          // Verificar si el grupo de destino (que ahora es el activo) tiene más cartas para voltear
+          const updatedGroups = [...groups]
+          updatedGroups[currentGroup] = updatedGroups[currentGroup].slice(0, -1) // Ya removida arriba
+
+          if (updatedGroups[targetGroupIndex].length === 0) {
+            // El grupo de destino no tiene más cartas, el juego puede terminar
+            console.log(`VICTORIA: Grupo ${targetGroupIndex} completado y sin más cartas para voltear`)
+
+            setCurrentPhase('checking')
+            setIsAutoPlaying(false) // Detener el juego inmediatamente
+            const finalMessage = 'Las cartas han encontrado su orden perfecto. El destino se revela.'
+
+            setTimeout(() => {
+              setCurrentPhase('finished')
+              if (onGameEnd) {
+                onGameEnd({
+                  success: true,
+                  finalMessage: finalMessage,
+                  steps: gameStep + 1,
+                  completedGroups: completedGroups.size + 1,
+                  reason: 'Grupo completado y ordenado sin más cartas'
+                })
+              }
+            }, 2000)
+            return
+          }
+        }
+      }
+
+      // 6. Cambiar al grupo de destino para la siguiente iteración
       setCurrentGroup(targetGroupIndex)
 
       // 6. Verificar si algún grupo se completó
@@ -182,40 +326,27 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
           )
           if (isComplete) {
             newCompletedGroups.add(index)
+            // Si es un grupo recién completado, revelar todas sus cartas
+            if (!completedGroups.has(index)) {
+              revealCompletedGroup(index)
+            }
           }
         }
       })
       setCompletedGroups(newCompletedGroups)
 
-      // 7. Pausa antes del siguiente movimiento
+      // 7. Pausa antes del siguiente movimiento (solo si el juego sigue activo)
       setTimeout(() => {
-        // Límite de seguridad para evitar bucles infinitos
-        if (gameStep > 200) {
-          setCurrentPhase('checking')
-
-          const won = isGameWon(groups)
-          const finalMessage = won
-            ? 'Las cartas han revelado su orden perfecto. El destino sonríe.'
-            : 'El orden cósmico permanece oculto. Intenta nuevamente.'
-
-          setTimeout(() => {
-            setCurrentPhase('finished')
-            if (onGameEnd) {
-              onGameEnd({
-                success: won,
-                finalMessage: finalMessage,
-                steps: gameStep,
-                completedGroups: completedGroups.size
-              })
-            }
-          }, 2000)
+        // Verificar si el juego sigue activo antes de continuar
+        if (currentPhase === 'playing' && isAutoPlaying) {
+          // El juego continúa hasta encontrar bloqueo o completar todas las cartas
         }
       }, 800)
     }
 
     const timer = setTimeout(playStep, 2000)
     return () => clearTimeout(timer)
-  }, [isAutoPlaying, groups, gameStep, currentPhase, currentGroup, onGameEnd, completedGroups.size])
+  }, [isAutoPlaying, groups, gameStep, currentPhase, currentGroup, onGameEnd])
 
   // Posiciones de los grupos en círculo
   const getGroupPosition = (index) => {
@@ -252,6 +383,8 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
     const position = getGroupPosition(index)
     const isCompleted = completedGroups.has(index)
     const isCentral = index === 0
+    const isRevealing = revealingGroups.has(index)
+    const ordered = orderedCards[index] || []
 
     return (
       <motion.div
@@ -260,9 +393,9 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
         style={{
           ...position,
           display: 'flex',
-          flexDirection: 'column',
+          flexDirection: 'row',
           alignItems: 'center',
-          gap: '3px',
+          gap: '10px',
           border: index === currentGroup && currentPhase === 'playing' ? '2px solid var(--gold-light)' : '1px solid transparent',
           borderRadius: '8px',
           padding: '5px'
@@ -286,72 +419,137 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
           }
         }}
       >
-        {/* Etiqueta del grupo */}
-        <motion.div
-          style={{
-            fontSize: '14px',
-            fontWeight: 'bold',
-            color: isCompleted ? 'var(--gold-light)' : 'var(--gold)',
-            marginBottom: '5px',
-            fontFamily: 'var(--font-decorative)'
-          }}
-          animate={isCompleted ? { scale: [1, 1.1, 1] } : {}}
-          transition={{ duration: 1, repeat: Infinity }}
-        >
-          {isCentral ? 'K' : index === 1 ? 'A' : index}
-        </motion.div>
-
-        {/* Cartas del grupo */}
+        {/* Cartas ordenadas (lado izquierdo) */}
         <div style={{
           display: 'flex',
-          flexDirection: isCompleted ? 'row' : 'column',
-          gap: isCompleted ? '5px' : '2px',
-          position: 'relative',
-          minHeight: '40px',
-          flexWrap: 'wrap',
-          justifyContent: 'center'
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '2px',
+          minWidth: '60px'
         }}>
-          {group.map((card, cardIndex) => (
-            <motion.div
-              key={`${card.id}-${cardIndex}`}
-              style={{
-                position: isCompleted ? 'relative' : 'absolute',
-                top: isCompleted ? '0px' : `${cardIndex * -3}px`,
-                zIndex: cardIndex + 1,
-              }}
-              initial={{ opacity: 0, y: -50 }}
-              animate={{
-                opacity: 1,
-                y: 0,
-                scale: movingCard?.id === card.id ? 1.2 : (isCompleted ? 0.8 : 1),
-                rotateY: isCompleted ? [0, 360, 0] : 0
-              }}
-              transition={{
-                delay: cardIndex * 0.1,
-                duration: movingCard?.id === card.id ? 0.8 : 0.3,
-                rotateY: { duration: 2, delay: cardIndex * 0.2 }
-              }}
-            >
-              <Card
-                card={card}
-                isFlipped={card.faceUp || false} // Mostrar solo si está boca arriba
-                className={movingCard?.id === card.id ? 'moving' : ''}
-              />
-            </motion.div>
-          ))}
+          <div style={{
+            fontSize: '10px',
+            color: 'var(--gold)',
+            opacity: 0.8,
+            marginBottom: '2px'
+          }}>
+            Ordenadas: {ordered.length}/4
+          </div>
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1px',
+            position: 'relative',
+            minHeight: '40px'
+          }}>
+            {ordered.map((card, cardIndex) => (
+              <motion.div
+                key={`ordered-${card.id}-${cardIndex}`}
+                style={{
+                  position: 'absolute',
+                  top: `${cardIndex * -2}px`,
+                  zIndex: cardIndex + 1,
+                }}
+                initial={{ opacity: 0, x: -30 }}
+                animate={{
+                  opacity: 1,
+                  x: 0,
+                  scale: 0.6
+                }}
+                transition={{
+                  delay: cardIndex * 0.1,
+                  duration: 0.3
+                }}
+              >
+                <Card
+                  card={card}
+                  isFlipped={true}
+                  className="ordered-card"
+                />
+              </motion.div>
+            ))}
+          </div>
         </div>
 
-        {/* Indicador de cartas restantes */}
-        <motion.div
-          style={{
-            fontSize: '12px',
-            opacity: 0.7,
-            marginTop: '5px',
-            color: index === currentGroup && currentPhase === 'playing' ? 'var(--gold-light)' : 'var(--gold)'
-          }}
-        >
-          {group.length}/4 {index === currentGroup && currentPhase === 'playing' && '← ACTUAL'}
-        </motion.div>
+        {/* Grupo principal (centro) */}
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '3px'
+        }}>
+          {/* Etiqueta del grupo */}
+          <motion.div
+            style={{
+              fontSize: '14px',
+              fontWeight: 'bold',
+              color: isCompleted ? 'var(--gold-light)' : 'var(--gold)',
+              marginBottom: '5px',
+              fontFamily: 'var(--font-decorative)'
+            }}
+            animate={isCompleted ? { scale: [1, 1.1, 1] } : {}}
+            transition={{ duration: 1, repeat: Infinity }}
+          >
+            {isCentral ? 'K' : index === 1 ? 'A' : index}
+          </motion.div>
+
+          {/* Cartas del grupo */}
+          <div style={{
+            display: 'flex',
+            flexDirection: (isCompleted && !isRevealing) ? 'row' : 'column',
+            gap: (isCompleted && !isRevealing) ? '5px' : '2px',
+            position: 'relative',
+            minHeight: '40px',
+            flexWrap: 'wrap',
+            justifyContent: 'center'
+          }}>
+            {group.map((card, cardIndex) => (
+              <motion.div
+                key={`${card.id}-${cardIndex}`}
+                style={{
+                  position: (isCompleted && !isRevealing) ? 'relative' : 'absolute',
+                  // Para mostrar el orden correcto: las cartas más recientes (índice bajo) van abajo
+                  top: (isCompleted && !isRevealing) ? '0px' : `${(group.length - 1 - cardIndex) * -3}px`,
+                  zIndex: cardIndex + 1,
+                }}
+                initial={{ opacity: 0, y: -50 }}
+                animate={{
+                  opacity: 1,
+                  y: 0,
+                  scale: movingCard?.id === card.id ? 1.2 : ((isCompleted && !isRevealing) ? 0.8 : 1),
+                  rotateY: (isCompleted && !isRevealing) ? [0, 360, 0] : 0,
+                  // Efecto abanico para grupos completados
+                  rotate: (isCompleted && !isRevealing) ? (cardIndex - 1.5) * 15 : 0
+                }}
+                transition={{
+                  delay: cardIndex * 0.1,
+                  duration: movingCard?.id === card.id ? 0.8 : 0.3,
+                  rotateY: { duration: 2, delay: cardIndex * 0.2 },
+                  rotate: { duration: 0.5, delay: cardIndex * 0.1 }
+                }}
+              >
+                <Card
+                  card={card}
+                  isFlipped={card.faceUp || false} // Mostrar solo si está boca arriba
+                  className={movingCard?.id === card.id ? 'moving' : ''}
+                />
+              </motion.div>
+            ))}
+          </div>
+
+          {/* Indicador de cartas restantes */}
+          <motion.div
+            style={{
+              fontSize: '12px',
+              opacity: 0.7,
+              marginTop: '5px',
+              color: index === currentGroup && currentPhase === 'playing' ? 'var(--gold-light)' : 'var(--gold)'
+            }}
+          >
+            {group.length}/4 {index === currentGroup && currentPhase === 'playing' && '← ACTUAL'}
+            {isCompleted && ' ✓'}
+          </motion.div>
+        </div>
       </motion.div>
     )
   }

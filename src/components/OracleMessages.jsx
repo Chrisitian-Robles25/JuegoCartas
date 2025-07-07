@@ -9,6 +9,12 @@ const OracleMessages = ({ isGameActive, currentPhase }) => {
   useEffect(() => {
     if (!isGameActive) return
 
+    // No mostrar mensajes cuando el juego ha terminado
+    if (currentPhase === 'finished') {
+      setCurrentMessage('')
+      return
+    }
+
     // Mostrar mensajes según la fase del juego
     let message = ''
 
@@ -26,18 +32,22 @@ const OracleMessages = ({ isGameActive, currentPhase }) => {
         message = 'El oráculo contempla el orden de las cartas...'
         break
       default:
-        message = getRandomPhrase(frasesOraculo)
+        if (currentPhase !== 'finished') {
+          message = getRandomPhrase(frasesOraculo)
+        }
     }
 
-    setCurrentMessage(message)
-    setMessageKey(prev => prev + 1)
+    if (message) {
+      setCurrentMessage(message)
+      setMessageKey(prev => prev + 1)
+    }
 
-    // Cambiar mensaje periódicamente durante el juego
+    // Cambiar mensaje periódicamente durante el juego (menos frecuente)
     if (currentPhase === 'playing') {
       const interval = setInterval(() => {
         setCurrentMessage(getRandomPhrase(frasesOraculo))
         setMessageKey(prev => prev + 1)
-      }, 4000)
+      }, 8000) // Cambiado de 4000 a 8000 (8 segundos)
 
       return () => clearInterval(interval)
     }
@@ -56,8 +66,8 @@ const OracleMessages = ({ isGameActive, currentPhase }) => {
         left: '50%',
         transform: 'translateX(-50%)',
         zIndex: 100,
-        maxWidth: '600px',
-        width: '90%'
+        maxWidth: '400px', // Reducido de 600px a 400px
+        width: '80%' // Reducido de 90% a 80%
       }}
     >
       <AnimatePresence mode="wait">
@@ -88,10 +98,10 @@ const OracleMessages = ({ isGameActive, currentPhase }) => {
             background: 'rgba(0, 0, 0, 0.9)',
             backdropFilter: 'blur(10px)',
             border: '2px solid var(--gold)',
-            borderRadius: '20px',
-            padding: '20px',
+            borderRadius: '15px', // Reducido de 20px a 15px
+            padding: '15px', // Reducido de 20px a 15px
             textAlign: 'center',
-            fontSize: '18px',
+            fontSize: '16px', // Reducido de 18px a 16px
             fontStyle: 'italic',
             color: 'var(--gold)',
             position: 'relative',
