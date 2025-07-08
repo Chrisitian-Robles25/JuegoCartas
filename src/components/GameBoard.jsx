@@ -5,7 +5,7 @@ import OracleMessages from './OracleMessages'
 import { createDeck, casinoShuffle, distributeCards, isGameWon } from '../utils/shuffle'
 import { frasesFinales, getRandomPhrase } from '../utils/oraclePhrases'
 
-const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
+const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto' }) => {
   const [groups, setGroups] = useState(Array.from({ length: 13 }, () => []))
   const [currentPhase, setCurrentPhase] = useState('shuffling') // 'shuffling', 'distributing', 'playing', 'checking', 'finished'
   const [movingCard, setMovingCard] = useState(null)
@@ -19,6 +19,13 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
   const [revealingPosition, setRevealingPosition] = useState(null) // Posición de la carta siendo revelada
   const [revealingGroups, setRevealingGroups] = useState(new Set()) // Grupos en proceso de revelación
   const [orderedCards, setOrderedCards] = useState(Array.from({ length: 13 }, () => [])) // Cartas ordenadas por grupo
+
+  // Estados específicos para modo manual
+  const [isManualMode, setIsManualMode] = useState(gameMode === 'manual')
+  const [waitingForReveal, setWaitingForReveal] = useState(false) // Esperando que usuario revele carta
+  const [waitingForPlacement, setWaitingForPlacement] = useState(false) // Esperando que usuario coloque carta
+  const [allowedGroups, setAllowedGroups] = useState(new Set()) // Grupos que el usuario puede tocar
+  const [manualRevealedCard, setManualRevealedCard] = useState(null) // Carta revelada en modo manual
 
   // Función para revelar todas las cartas de un grupo completado
   const revealCompletedGroup = async (groupIndex) => {
@@ -62,6 +69,12 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
     setRevealingGroups(new Set()) // Resetear grupos en revelación
     setOrderedCards(Array.from({ length: 13 }, () => [])) // Resetear cartas ordenadas
 
+    // Resetear estados de modo manual
+    setWaitingForReveal(false)
+    setWaitingForPlacement(false)
+    setAllowedGroups(new Set())
+    setManualRevealedCard(null)
+
     // 1. Crear el mazo inicial y mostrarlo
     const newDeck = createDeck()
     setDeck(newDeck)
@@ -103,10 +116,18 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
     await new Promise(resolve => setTimeout(resolve, 1000))
     setCurrentPhase('playing')
 
-    // 5. Comenzar el juego automático
-    setTimeout(() => {
-      setIsAutoPlaying(true)
-    }, 1000)
+    // 5. Configurar modo de juego
+    if (isManualMode) {
+      // Modo manual: habilitar solo el grupo central (Rey/13)
+      setAllowedGroups(new Set([0]))
+      setWaitingForReveal(true)
+      console.log('Modo manual iniciado. Solo el grupo central está habilitado.')
+    } else {
+      // Modo automático: comenzar el juego automático
+      setTimeout(() => {
+        setIsAutoPlaying(true)
+      }, 1000)
+    }
   }
   // Lógica principal del juego automático
   useEffect(() => {
@@ -454,6 +475,194 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
     }
   }, [isAutoPlaying, groups, gameStep, currentPhase, currentGroup, onGameEnd])
 
+  // Funciones para modo manual
+  const handleManualGroupClick = (groupIndex) => {
+    if (!isManualMode || !allowedGroups.has(groupIndex)) return
+
+    if (waitingForReveal) {
+      // Revelar carta del grupo clickeado
+      handleManualReveal(groupIndex)
+    } else if (waitingForPlacement && manualRevealedCard) {
+      // Colocar carta en el grupo clickeado
+      handleManualPlacement(groupIndex)
+    }
+  }
+
+  const handleManualReveal = (groupIndex) => {
+    const group = groups[groupIndex]
+    if (!group || group.length === 0) return
+
+    const topCard = group[group.length - 1]
+
+    // Verificar bloqueo antes de revelar
+    let targetGroupIndex
+    if (topCard.value === 13) {
+      targetGroupIndex = 0
+    } else if (topCard.value === 1) {
+      targetGroupIndex = 1
+    } else {
+      targetGroupIndex = topCard.value
+    }
+
+    const targetGroup = groups[targetGroupIndex]
+    const expectedValue = targetGroupIndex === 0 ? 13 : targetGroupIndex
+    const cardsOfCorrectValue = targetGroup.filter(card => card.value === expectedValue).length
+
+    if (cardsOfCorrectValue >= 3 && topCard.value === expectedValue) {
+      // BLOQUEO detectado
+      console.log(`BLOQUEO DETECTADO en modo manual: Grupo ${targetGroupIndex} ya tiene ${cardsOfCorrectValue} cartas del valor ${expectedValue}`)
+
+      setRevealedCard({ ...topCard, faceUp: true })
+      setRevealingPosition({ groupIndex, cardIndex: group.length - 1 })
+
+      setTimeout(() => {
+        let completedOrderedGroups = 0
+        orderedCards.forEach((orderedGroup) => {
+          if (orderedGroup.length === 4) {
+            completedOrderedGroups++
+          }
+        })
+
+        setCurrentPhase('finished')
+        if (onGameEnd) {
+          onGameEnd({
+            success: false,
+            finalMessage: 'No tienes suerte hoy. El destino ha cerrado todos los caminos.',
+            steps: gameStep,
+            completedGroups: completedOrderedGroups,
+            reason: `DERROTA: Grupo ${targetGroupIndex} bloqueado con ${cardsOfCorrectValue} cartas del valor ${expectedValue}`
+          })
+        }
+      }, 3000)
+      return
+    }
+
+    // Revelar carta
+    setManualRevealedCard({ ...topCard, faceUp: true })
+    setWaitingForReveal(false)
+    setWaitingForPlacement(true)
+
+    // Determinar grupos válidos para colocación
+    const validGroups = new Set([targetGroupIndex])
+
+    // Si la carta va a su lugar correcto, también permitir el área de ordenadas
+    const isCardGoingToCorrectPlace = topCard.value === expectedValue
+    if (isCardGoingToCorrectPlace) {
+      validGroups.add(-1) // -1 representa el área de cartas ordenadas
+    }
+
+    setAllowedGroups(validGroups)
+    setCurrentGroup(groupIndex) // Recordar de dónde viene la carta
+
+    console.log(`Carta revelada: ${topCard.display} de ${topCard.suit}. Colocar en grupo ${targetGroupIndex}`)
+  }
+
+  const handleManualPlacement = (targetGroupIndex) => {
+    if (!manualRevealedCard) return
+
+    const sourceGroup = groups[currentGroup]
+    const topCard = manualRevealedCard
+    const expectedValue = targetGroupIndex === 0 ? 13 : targetGroupIndex
+    const isCardGoingToCorrectPlace = topCard.value === expectedValue
+
+    // Remover carta del grupo origen
+    setGroups(prevGroups => {
+      const newGroups = [...prevGroups]
+      newGroups[currentGroup] = newGroups[currentGroup].slice(0, -1)
+      return newGroups
+    })
+
+    if (isCardGoingToCorrectPlace) {
+      // Colocar en cartas ordenadas
+      setOrderedCards(prevOrdered => {
+        const newOrdered = [...prevOrdered]
+        newOrdered[targetGroupIndex] = [...newOrdered[targetGroupIndex], topCard]
+        return newOrdered
+      })
+
+      // Verificar si el grupo de destino tiene cartas para la siguiente ronda
+      const nextActiveGroup = groups[targetGroupIndex]
+      if (nextActiveGroup.length === 0) {
+        // Derrota: grupo sin cartas
+        let completedOrderedGroups = 0
+        orderedCards.forEach((orderedGroup, index) => {
+          const expectedCount = (index === targetGroupIndex) ? (orderedGroup.length + 1) : orderedGroup.length
+          if (expectedCount === 4) {
+            completedOrderedGroups++
+          }
+        })
+
+        setTimeout(() => {
+          setCurrentPhase('finished')
+          if (onGameEnd) {
+            onGameEnd({
+              success: false,
+              finalMessage: 'No tienes suerte hoy. El grupo de destino se quedó sin cartas para revelar.',
+              steps: gameStep + 1,
+              completedGroups: completedOrderedGroups,
+              reason: `DERROTA: Grupo ${targetGroupIndex} sin cartas para revelar tras colocar carta ordenada`
+            })
+          }
+        }, 1000)
+        return
+      }
+
+      // Verificar victoria completa
+      const currentOrderedCount = (orderedCards[targetGroupIndex]?.length || 0) + 1
+      if (currentOrderedCount === 4) {
+        let totalOrderedCards = 0
+        let allGroupsComplete = true
+
+        orderedCards.forEach((orderedGroup, index) => {
+          const expectedCount = (index === targetGroupIndex) ? currentOrderedCount : orderedGroup.length
+          totalOrderedCards += expectedCount
+
+          if (expectedCount < 4) {
+            allGroupsComplete = false
+          }
+        })
+
+        if (allGroupsComplete && totalOrderedCards === 52) {
+          setTimeout(() => {
+            setCurrentPhase('finished')
+            if (onGameEnd) {
+              onGameEnd({
+                success: true,
+                finalMessage: '¡Felicidades! Has logrado el orden perfecto. La suerte te sonríe.',
+                steps: gameStep + 1,
+                completedGroups: 13,
+                reason: 'Todos los grupos completados correctamente'
+              })
+            }
+          }, 1000)
+          return
+        }
+      }
+
+      // Continuar con el grupo de destino
+      setCurrentGroup(targetGroupIndex)
+    } else {
+      // Colocar en grupo normal
+      setGroups(prevGroups => {
+        const newGroups = [...prevGroups]
+        newGroups[targetGroupIndex] = [topCard, ...newGroups[targetGroupIndex]]
+        return newGroups
+      })
+
+      // Continuar con el grupo de destino
+      setCurrentGroup(targetGroupIndex)
+    }
+
+    // Resetear estados manuales
+    setManualRevealedCard(null)
+    setWaitingForPlacement(false)
+    setWaitingForReveal(true)
+    setAllowedGroups(new Set([targetGroupIndex])) // Solo permitir el nuevo grupo activo
+    setGameStep(prev => prev + 1)
+
+    console.log(`Carta colocada. Siguiente grupo activo: ${targetGroupIndex}`)
+  }
+
   // Posiciones de los grupos en círculo (con más separación horizontal)
   const getGroupPosition = (index) => {
     if (index === 0) {
@@ -493,6 +702,11 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
     const isRevealing = revealingGroups.has(index)
     const ordered = orderedCards[index] || []
 
+    // Estados para modo manual
+    const isClickable = isManualMode && allowedGroups.has(index) && currentPhase === 'playing'
+    const isCurrentGroupHighlighted = index === currentGroup && currentPhase === 'playing'
+    const hasCardsToReveal = group.length > 0
+
     return (
       <motion.div
         key={index}
@@ -503,9 +717,16 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
           flexDirection: 'row',
           alignItems: 'center',
           gap: '10px',
-          border: index === currentGroup && currentPhase === 'playing' ? '2px solid var(--gold-light)' : '1px solid transparent',
+          border: isCurrentGroupHighlighted
+            ? '2px solid var(--gold-light)'
+            : isClickable
+              ? '2px solid var(--gold)'
+              : '1px solid transparent',
           borderRadius: '8px',
-          padding: '5px'
+          padding: '5px',
+          cursor: isClickable ? 'pointer' : 'default',
+          background: isClickable ? 'rgba(212, 175, 55, 0.1)' : 'transparent',
+          transition: 'all 0.3s ease'
         }}
         initial={{ opacity: 0, scale: 0 }}
         animate={{
@@ -515,16 +736,23 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
             "0 0 15px var(--gold)",
             "0 0 30px var(--gold)",
             "0 0 15px var(--gold)"
+          ] : isClickable ? [
+            "0 0 10px var(--gold)",
+            "0 0 20px var(--gold)",
+            "0 0 10px var(--gold)"
           ] : undefined
         }}
         transition={{
           delay: index * 0.1,
           boxShadow: {
-            duration: 2,
+            duration: 1.5,
             repeat: Infinity,
             ease: "easeInOut"
           }
         }}
+        onClick={() => isClickable && handleManualGroupClick(index)}
+        whileHover={isClickable ? { scale: 1.05 } : {}}
+        whileTap={isClickable ? { scale: 0.95 } : {}}
       >
         {/* Cartas ordenadas (lado izquierdo) */}
         <div style={{
@@ -771,7 +999,7 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
       )}
 
       {/* Carta revelada como superposición */}
-      {revealedCard && revealingPosition && (
+      {(revealedCard && revealingPosition) || (isManualMode && manualRevealedCard) ? (
         <motion.div
           style={{
             position: 'fixed',
@@ -806,7 +1034,7 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
           }}
         >
           <Card
-            card={revealedCard}
+            card={isManualMode && manualRevealedCard ? manualRevealedCard : revealedCard}
             isFlipped={true}
             className="revealed-card"
           />
@@ -821,10 +1049,10 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
             animate={{ opacity: [0.7, 1, 0.7] }}
             transition={{ duration: 1, repeat: Infinity }}
           >
-            Carta Revelada
+            {isManualMode ? 'Carta Revelada - Elige Destino' : 'Carta Revelada'}
           </motion.div>
         </motion.div>
-      )}
+      ) : null}
 
       {/* Indicador de progreso */}
       <motion.div
@@ -848,6 +1076,69 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
         {currentPhase === 'playing' && 'El oráculo trabaja su magia...'}
         {currentPhase === 'checking' && 'Contemplando el resultado final...'}
       </motion.div>
+
+      {/* Panel de instrucciones para modo manual */}
+      {isManualMode && currentPhase === 'playing' && (
+        <motion.div
+          style={{
+            position: 'fixed',
+            top: '20px',
+            left: '20px',
+            background: 'rgba(0, 0, 0, 0.9)',
+            border: '2px solid var(--gold)',
+            borderRadius: '15px',
+            padding: '20px',
+            maxWidth: '300px',
+            zIndex: 1000
+          }}
+          initial={{ opacity: 0, x: -50 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: 1 }}
+        >
+          <h3 style={{
+            color: 'var(--gold)',
+            marginBottom: '15px',
+            fontSize: '18px',
+            textAlign: 'center',
+            fontFamily: 'var(--font-decorative)'
+          }}>
+            🎮 Modo Manual
+          </h3>
+
+          {waitingForReveal && (
+            <div style={{ color: 'var(--gold-light)', fontSize: '14px', lineHeight: '1.4' }}>
+              <p><strong>📋 Instrucciones:</strong></p>
+              <p>• Click en el <strong>grupo resaltado</strong> para revelar la carta superior</p>
+              <p>• Solo puedes interactuar con grupos habilitados</p>
+              {manualRevealedCard && (
+                <p style={{ marginTop: '10px', color: 'var(--gold)' }}>
+                  <strong>Carta a revelar:</strong> {manualRevealedCard.display} de {manualRevealedCard.suit}
+                </p>
+              )}
+            </div>
+          )}
+
+          {waitingForPlacement && manualRevealedCard && (
+            <div style={{ color: 'var(--gold-light)', fontSize: '14px', lineHeight: '1.4' }}>
+              <p><strong>📋 Instrucciones:</strong></p>
+              <p>• Click en el <strong>grupo destino</strong> para colocar la carta</p>
+              <p><strong>Carta revelada:</strong> {manualRevealedCard.display} de {manualRevealedCard.suit}</p>
+              <p>• Destino: Grupo {manualRevealedCard.value === 13 ? 'K' : manualRevealedCard.value === 1 ? 'A' : manualRevealedCard.value}</p>
+            </div>
+          )}
+
+          <div style={{
+            marginTop: '15px',
+            paddingTop: '10px',
+            borderTop: '1px solid var(--gold)',
+            fontSize: '12px',
+            color: 'var(--gold-light)'
+          }}>
+            <p>Paso: {gameStep}</p>
+            <p>Grupo actual: {currentGroup === 0 ? 'K' : currentGroup === 1 ? 'A' : currentGroup}</p>
+          </div>
+        </motion.div>
+      )}
     </div>
   )
 }

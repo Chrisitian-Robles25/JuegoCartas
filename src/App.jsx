@@ -10,6 +10,8 @@ function App() {
   const [isLoading, setIsLoading] = useState(true)
   const [gameStarted, setGameStarted] = useState(false)
   const [gameResult, setGameResult] = useState(null) // Resultado del juego para mostrar pantalla final
+  const [gameMode, setGameMode] = useState('auto') // Modo de juego: 'auto' o 'manual'
+  const [playerQuestion, setPlayerQuestion] = useState('')
 
   console.log('App renderizado, isLoading:', isLoading, 'gameStarted:', gameStarted)
 
@@ -22,8 +24,10 @@ function App() {
     return () => clearTimeout(timer)
   }, [])
 
-  const handleStartGame = () => {
-    console.log('Iniciando juego...')
+  const handleStartGame = (question, mode) => {
+    console.log('Iniciando juego...', { question, mode })
+    setPlayerQuestion(question)
+    setGameMode(mode)
     setGameStarted(true)
   }
 
@@ -253,7 +257,8 @@ function App() {
       <GameBoard
         onBackToIntro={handleBackToIntro}
         onGameEnd={handleGameEnd}
-        playerQuestion="¿Qué me depara el destino?"
+        playerQuestion={playerQuestion}
+        gameMode={gameMode}
       />
     </>
   )
