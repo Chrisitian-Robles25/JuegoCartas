@@ -143,10 +143,13 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
           // Verificar si REALMENTE todas las cartas están ordenadas correctamente (52 cartas)
           let allGroupsComplete = true
           let totalOrderedCards = 0
+          let completedOrderedGroups = 0
 
           orderedCards.forEach((orderedGroup, index) => {
             totalOrderedCards += orderedGroup.length
-            if (orderedGroup.length < 4) {
+            if (orderedGroup.length === 4) {
+              completedOrderedGroups++
+            } else if (orderedGroup.length < 4) {
               allGroupsComplete = false
             }
           })
@@ -154,7 +157,7 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
           // Solo es victoria si TODAS las 52 cartas están ordenadas en sus grupos correctos
           const won = allGroupsComplete && totalOrderedCards === 52
 
-          console.log(`Fin del juego - Sin cartas restantes. Grupos completos: ${allGroupsComplete}, Total ordenadas: ${totalOrderedCards}/52`)
+          console.log(`Fin del juego - Sin cartas restantes. Grupos ordenados completos: ${completedOrderedGroups}/13, Total ordenadas: ${totalOrderedCards}/52`)
 
           const finalMessage = won
             ? '¡Felicidades! Has logrado el orden perfecto. La suerte te sonríe.'
@@ -165,7 +168,7 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
               success: won,
               finalMessage: finalMessage,
               steps: gameStep,
-              completedGroups: won ? 13 : completedGroups.size,
+              completedGroups: completedOrderedGroups, // Usar el conteo real de grupos ordenados
               reason: won ? 'Todas las cartas ordenadas correctamente' : 'Sin cartas restantes pero orden incompleto'
             })
           }
@@ -185,6 +188,15 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
         if (!foundGroup) {
           // Esto no debería pasar si el conteo anterior es correcto
           console.error('Error: No se encontró grupo con cartas pero totalCardsRemaining > 0')
+
+          // Contar grupos ordenados correctamente
+          let completedOrderedGroups = 0
+          orderedCards.forEach((orderedGroup) => {
+            if (orderedGroup.length === 4) {
+              completedOrderedGroups++
+            }
+          })
+
           setIsAutoPlaying(false)
           setCurrentPhase('finished')
 
@@ -193,7 +205,7 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
               success: false,
               finalMessage: 'Error en el juego. No tienes suerte hoy.',
               steps: gameStep,
-              completedGroups: completedGroups.size,
+              completedGroups: completedOrderedGroups, // Usar el conteo real de grupos ordenados
               reason: 'Error: Sin grupos válidos'
             })
           }
@@ -234,6 +246,14 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
         setIsAutoPlaying(false)
         setCurrentPhase('finished')
 
+        // Contar grupos ordenados correctamente
+        let completedOrderedGroups = 0
+        orderedCards.forEach((orderedGroup) => {
+          if (orderedGroup.length === 4) {
+            completedOrderedGroups++
+          }
+        })
+
         const finalMessage = 'No tienes suerte hoy. El destino ha cerrado todos los caminos.'
 
         if (onGameEnd) {
@@ -241,7 +261,7 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
             success: false,
             finalMessage: finalMessage,
             steps: gameStep,
-            completedGroups: completedGroups.size,
+            completedGroups: completedOrderedGroups, // Usar el conteo real de grupos ordenados
             reason: `DERROTA: Grupo ${targetGroupIndex} bloqueado con ${cardsOfCorrectValue} cartas del valor ${expectedValue}`
           })
         }
@@ -329,6 +349,15 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
           // DERROTA: No hay cartas para revelar en el grupo de destino
           console.log(`DERROTA: Grupo ${targetGroupIndex} no tiene cartas para revelar después de colocar carta ordenada`)
 
+          // Contar grupos ordenados correctamente
+          let completedOrderedGroups = 0
+          orderedCards.forEach((orderedGroup, index) => {
+            const expectedCount = (index === targetGroupIndex) ? (orderedGroup.length + 1) : orderedGroup.length
+            if (expectedCount === 4) {
+              completedOrderedGroups++
+            }
+          })
+
           setIsAutoPlaying(false)
           setCurrentPhase('finished')
 
@@ -339,7 +368,7 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
               success: false,
               finalMessage: finalMessage,
               steps: gameStep + 1,
-              completedGroups: completedGroups.size,
+              completedGroups: completedOrderedGroups, // Usar el conteo real de grupos ordenados
               reason: `DERROTA: Grupo ${targetGroupIndex} sin cartas para revelar tras colocar carta ordenada`
             })
           }
