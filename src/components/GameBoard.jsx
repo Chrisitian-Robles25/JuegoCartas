@@ -140,7 +140,7 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
           setIsAutoPlaying(false)
           setCurrentPhase('finished')
 
-          // Verificar si todas las cartas están ordenadas correctamente
+          // Verificar si REALMENTE todas las cartas están ordenadas correctamente (52 cartas)
           let allGroupsComplete = true
           let totalOrderedCards = 0
 
@@ -151,19 +151,22 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
             }
           })
 
+          // Solo es victoria si TODAS las 52 cartas están ordenadas en sus grupos correctos
           const won = allGroupsComplete && totalOrderedCards === 52
+
+          console.log(`Fin del juego - Sin cartas restantes. Grupos completos: ${allGroupsComplete}, Total ordenadas: ${totalOrderedCards}/52`)
 
           const finalMessage = won
             ? '¡Felicidades! Has logrado el orden perfecto. La suerte te sonríe.'
-            : 'No tienes suerte hoy. Las cartas no encontraron su lugar.'
+            : 'No tienes suerte hoy. Las cartas no encontraron su lugar correcto.'
 
           if (onGameEnd) {
             onGameEnd({
               success: won,
               finalMessage: finalMessage,
               steps: gameStep,
-              completedGroups: completedGroups.size,
-              reason: 'Sin más cartas para jugar'
+              completedGroups: won ? 13 : completedGroups.size,
+              reason: won ? 'Todas las cartas ordenadas correctamente' : 'Sin cartas restantes pero orden incompleto'
             })
           }
           return
@@ -314,38 +317,71 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro }) => {
       setRevealingPosition(null)
       setGameStep(prev => prev + 1)
 
-      // 5. NUEVA REGLA: Verificar si el grupo de destino está completo y ordenado
+      // 5. VERIFICACIÓN CRÍTICA: Si la carta fue ordenada, verificar inmediatamente si el grupo de destino tiene cartas
       if (isCardGoingToCorrectPlace) {
-        // Calcular el número actual de cartas ordenadas para este grupo
+        // El grupo de destino ahora será el grupo activo para la siguiente ronda
+        const nextActiveGroup = groups[targetGroupIndex]
+
+        console.log(`Carta ordenada colocada. Verificando grupo de destino ${targetGroupIndex} para siguiente movimiento...`)
+        console.log(`Cartas restantes en grupo ${targetGroupIndex}:`, nextActiveGroup.length)
+
+        if (nextActiveGroup.length === 0) {
+          // DERROTA: No hay cartas para revelar en el grupo de destino
+          console.log(`DERROTA: Grupo ${targetGroupIndex} no tiene cartas para revelar después de colocar carta ordenada`)
+
+          setIsAutoPlaying(false)
+          setCurrentPhase('finished')
+
+          const finalMessage = 'No tienes suerte hoy. El grupo de destino se quedó sin cartas para revelar.'
+
+          if (onGameEnd) {
+            onGameEnd({
+              success: false,
+              finalMessage: finalMessage,
+              steps: gameStep + 1,
+              completedGroups: completedGroups.size,
+              reason: `DERROTA: Grupo ${targetGroupIndex} sin cartas para revelar tras colocar carta ordenada`
+            })
+          }
+          return
+        }
+
+        // Solo verificar victoria si el grupo está completo Y tiene todas las cartas del juego ordenadas
         const currentOrderedCount = (orderedCards[targetGroupIndex]?.length || 0) + 1
 
-        // Si el grupo tiene 4 cartas ordenadas, verificar si el grupo actual está vacío o sin cartas válidas
         if (currentOrderedCount === 4) {
           console.log(`Grupo ${targetGroupIndex} completado con 4 cartas ordenadas`)
 
-          // Verificar si quedan cartas en el grupo de destino para voltear
-          const groupAfterCardRemoval = groups[currentGroup].slice(0, -1)
+          // Verificar si TODOS los grupos están completos (52 cartas ordenadas en total)
+          let totalOrderedCards = 0
+          let allGroupsComplete = true
 
-          if (groupAfterCardRemoval.length === 0) {
-            // El grupo de destino no tiene más cartas, el juego puede terminar
-            console.log(`VICTORIA: Grupo ${targetGroupIndex} completado y sin más cartas para voltear`)
+          orderedCards.forEach((orderedGroup, index) => {
+            const expectedCount = (index === targetGroupIndex) ? currentOrderedCount : orderedGroup.length
+            totalOrderedCards += expectedCount
 
-            setCurrentPhase('checking')
-            setIsAutoPlaying(false) // Detener el juego inmediatamente
-            const finalMessage = 'Las cartas han encontrado su orden perfecto. El destino se revela.'
+            if (expectedCount < 4) {
+              allGroupsComplete = false
+            }
+          })
 
-            setTimeout(() => {
-              setCurrentPhase('finished')
-              if (onGameEnd) {
-                onGameEnd({
-                  success: true,
-                  finalMessage: finalMessage,
-                  steps: gameStep + 1,
-                  completedGroups: completedGroups.size + 1,
-                  reason: 'Grupo completado y ordenado sin más cartas'
-                })
-              }
-            }, 2000)
+          if (allGroupsComplete && totalOrderedCards === 52) {
+            // VICTORIA VERDADERA: Todos los grupos completados
+            console.log(`VICTORIA VERDADERA: Todos los grupos completados. Total de cartas ordenadas: ${totalOrderedCards}`)
+
+            setIsAutoPlaying(false)
+            setCurrentPhase('finished')
+            const finalMessage = '¡Felicidades! Has logrado el orden perfecto. La suerte te sonríe.'
+
+            if (onGameEnd) {
+              onGameEnd({
+                success: true,
+                finalMessage: finalMessage,
+                steps: gameStep + 1,
+                completedGroups: 13, // Todos los grupos
+                reason: 'Todos los grupos completados correctamente'
+              })
+            }
             return
           }
         }
