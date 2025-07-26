@@ -4,6 +4,7 @@ import Card from './Card'
 import OracleMessages from './OracleMessages'
 import { createDeck, casinoShuffle, distributeCards, isGameWon } from '../utils/shuffle'
 import { frasesFinales, getRandomPhrase } from '../utils/oraclePhrases'
+import { useSoundEffects } from '../utils/sounds'
 
 const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto' }) => {
   const [groups, setGroups] = useState(Array.from({ length: 13 }, () => []))
@@ -27,6 +28,43 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
   const [allowedGroups, setAllowedGroups] = useState(new Set()) // Grupos que el usuario puede tocar
   const [manualRevealedCard, setManualRevealedCard] = useState(null) // Carta revelada en modo manual
 
+  // Estados para control de velocidad
+  const [gameSpeed, setGameSpeed] = useState(1) // 1 = normal, 2 = rápido
+
+  // Hook de efectos de sonido
+  const soundEffects = useSoundEffects()
+  const { cardReveal = () => {}, shuffle = () => {}, cardOrdered = () => {}, victory = () => {}, defeat = () => {} } = soundEffects || {}
+
+  // Función helper para reproducir sonidos de forma segura
+  const playSound = async (soundFunction, soundName) => {
+    try {
+      console.log(`🎵 Intentando reproducir: ${soundName}`)
+      await soundFunction()
+      console.log(`✅ Sonido reproducido: ${soundName}`)
+    } catch (error) {
+      console.log(`❌ Error al reproducir ${soundName}:`, error)
+    }
+  }
+
+  // Función para obtener tiempos basados en la velocidad
+  const getTimings = () => {
+    const speedMultiplier = gameSpeed === 1 ? 1 : 0.6 // x2 usa 60% del tiempo original para mantener visibilidad
+    return {
+      cardRevealDelay: Math.max(1500 * speedMultiplier, 900), // Mínimo 900ms para ver bien la carta
+      movementDelay: Math.max(1500 * speedMultiplier, 500),   // Mínimo 500ms
+      stepInterval: Math.max(2000 * speedMultiplier, 800),     // Mínimo 800ms
+      blockingDelay: Math.max(3000 * speedMultiplier, 1500)   // Mínimo 1500ms
+    }
+  }
+
+  const getSpeedLabel = () => {
+    switch (gameSpeed) {
+      case 1: return '1x Normal'
+      case 2: return '2x Rápido'
+      default: return '1x Normal'
+    }
+  }
+
   // Función para revelar todas las cartas de un grupo completado
   const revealCompletedGroup = async (groupIndex) => {
     if (revealingGroups.has(groupIndex)) return
@@ -42,6 +80,8 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
         }
         return newGroups
       })
+      // Sonido de revelación de carta
+      playSound(cardReveal, 'Card Reveal - Group Complete')
       await new Promise(resolve => setTimeout(resolve, 200))
     }
 
@@ -84,6 +124,7 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
 
     // 2. Animación de barajado (riffle shuffle)
     setShuffleAnimation(true)
+    playSound(shuffle, 'Shuffle') // Sonido de barajado
     await new Promise(resolve => setTimeout(resolve, 2000))
 
     // 3. Barajar el mazo
@@ -184,6 +225,13 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
             ? '¡Felicidades! Has logrado el orden perfecto. La suerte te sonríe.'
             : 'No tienes suerte hoy. Las cartas no encontraron su lugar correcto.'
 
+          // Sonido de victoria o derrota
+          if (won) {
+            playSound(victory, 'Victory - No Cards Remaining')
+          } else {
+            playSound(defeat, 'Defeat - No Cards Remaining')
+          }
+
           if (onGameEnd) {
             onGameEnd({
               success: won,
@@ -261,7 +309,10 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
         setRevealedCard({ ...topCard, faceUp: true })
         setRevealingPosition({ groupIndex: currentGroup, cardIndex: currentGroupCards.length - 1 })
 
-        await new Promise(resolve => setTimeout(resolve, 3000))
+        // Sonido de revelación de carta
+        playSound(cardReveal, 'Card Reveal - Blocking')
+
+        await new Promise(resolve => setTimeout(resolve, getTimings().blockingDelay))
 
         // TERMINAR EL JUEGO INMEDIATAMENTE - DETECCIÓN DE DERROTA
         setIsAutoPlaying(false)
@@ -276,6 +327,9 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
         })
 
         const finalMessage = 'No tienes suerte hoy. El destino ha cerrado todos los caminos.'
+
+        // Sonido de derrota
+        playSound(defeat, 'Defeat - Blocking Game')
 
         if (onGameEnd) {
           onGameEnd({
@@ -298,19 +352,22 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
       setRevealedCard({ ...topCard, faceUp: true })
       setRevealingPosition({ groupIndex: currentGroup, cardIndex: currentGroupCards.length - 1 })
 
+      // Sonido de revelación de carta
+      playSound(cardReveal, 'Card Reveal - Auto Game')
+
       console.log(`Grupo ${currentGroup}: Tomando carta ${topCard.display} de ${topCard.suit} (carta ${currentGroupCards.length} de ${currentGroupCards.length})`)
 
       // Determinar si la carta va a su lugar correcto ANTES de revelarla
       const isCardGoingToCorrectPlace = topCard.value === expectedValue
 
       // Pausa para mostrar la carta revelada
-      await new Promise(resolve => setTimeout(resolve, 1500))
+      await new Promise(resolve => setTimeout(resolve, getTimings().cardRevealDelay))
 
       console.log(`Moviendo carta ${topCard.display} de ${topCard.suit} del grupo ${currentGroup} al grupo ${targetGroupIndex}`)
 
       // 3. Marcar la carta como en movimiento
       setMovingCard(topCard)
-      await new Promise(resolve => setTimeout(resolve, 1500))
+      await new Promise(resolve => setTimeout(resolve, getTimings().movementDelay))
 
       // 4. Mover la carta según su destino
 
@@ -330,6 +387,9 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
           console.log(`Cartas ordenadas en grupo ${targetGroupIndex}:`, newOrdered[targetGroupIndex].length, 'de 4')
           return newOrdered
         })
+
+        // Sonido de carta ordenada
+        playSound(cardOrdered, 'Card Ordered')
 
         console.log(`Carta ${topCard.display} colocada correctamente en grupo ${targetGroupIndex}`)
       } else {
@@ -384,6 +444,9 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
 
           const finalMessage = 'No tienes suerte hoy. El grupo de destino se quedó sin cartas para revelar.'
 
+          // Sonido de derrota
+          playSound(defeat, 'Defeat - No Cards In Target Group')
+
           if (onGameEnd) {
             onGameEnd({
               success: false,
@@ -422,6 +485,9 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
             setIsAutoPlaying(false)
             setCurrentPhase('finished')
             const finalMessage = '¡Felicidades! Has logrado el orden perfecto. La suerte te sonríe.'
+
+            // Sonido de victoria
+            playSound(victory, 'Victory - All Groups Complete')
 
             if (onGameEnd) {
               onGameEnd({
@@ -470,10 +536,10 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
 
     // Solo ejecutar el próximo paso si el juego sigue activo
     if (currentPhase === 'playing' && isAutoPlaying) {
-      const timer = setTimeout(playStep, 2000)
+      const timer = setTimeout(playStep, getTimings().stepInterval)
       return () => clearTimeout(timer)
     }
-  }, [isAutoPlaying, groups, gameStep, currentPhase, currentGroup, onGameEnd])
+  }, [isAutoPlaying, groups, gameStep, currentPhase, currentGroup, onGameEnd, gameSpeed])
 
   // Funciones para modo manual
   const handleManualGroupClick = (groupIndex) => {
@@ -515,6 +581,9 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
       setRevealedCard({ ...topCard, faceUp: true })
       setRevealingPosition({ groupIndex, cardIndex: group.length - 1 })
 
+      // Sonido de revelación de carta
+      cardReveal()
+
       setTimeout(() => {
         let completedOrderedGroups = 0
         orderedCards.forEach((orderedGroup) => {
@@ -524,6 +593,10 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
         })
 
         setCurrentPhase('finished')
+
+        // Sonido de derrota
+        defeat()
+
         if (onGameEnd) {
           onGameEnd({
             success: false,
@@ -541,6 +614,9 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
     setManualRevealedCard({ ...topCard, faceUp: true })
     setWaitingForReveal(false)
     setWaitingForPlacement(true)
+
+    // Sonido de revelación de carta
+    cardReveal()
 
     // Determinar grupos válidos para colocación
     const validGroups = new Set([targetGroupIndex])
@@ -580,6 +656,9 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
         return newOrdered
       })
 
+      // Sonido de carta ordenada
+      cardOrdered()
+
       // Verificar si el grupo de destino tiene cartas para la siguiente ronda
       const nextActiveGroup = groups[targetGroupIndex]
       if (nextActiveGroup.length === 0) {
@@ -594,6 +673,10 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
 
         setTimeout(() => {
           setCurrentPhase('finished')
+
+          // Sonido de derrota
+          defeat()
+
           if (onGameEnd) {
             onGameEnd({
               success: false,
@@ -625,6 +708,10 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
         if (allGroupsComplete && totalOrderedCards === 52) {
           setTimeout(() => {
             setCurrentPhase('finished')
+
+            // Sonido de victoria
+            victory()
+
             if (onGameEnd) {
               onGameEnd({
                 success: true,
@@ -917,6 +1004,54 @@ const GameBoard = ({ playerQuestion, onGameEnd, onBackToIntro, gameMode = 'auto'
         >
           ← Volver al Inicio
         </motion.button>
+      )}
+
+      {/* Control de velocidad para modo automático */}
+      {!isManualMode && currentPhase === 'playing' && (
+        <motion.div
+          style={{
+            position: 'fixed',
+            top: '20px',
+            right: onBackToIntro ? '180px' : '20px',
+            background: 'rgba(0, 0, 0, 0.8)',
+            border: '1px solid var(--gold)',
+            borderRadius: '8px',
+            padding: '10px',
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px'
+          }}
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.5 }}
+        >
+          <span style={{
+            color: 'var(--gold)',
+            fontSize: '12px',
+            fontWeight: 'bold'
+          }}>
+            ⚡ Velocidad:
+          </span>
+          <motion.button
+            onClick={() => setGameSpeed(gameSpeed === 1 ? 2 : 1)}
+            style={{
+              background: 'var(--gold)',
+              color: 'black',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '5px 12px',
+              fontSize: '12px',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              minWidth: '90px'
+            }}
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+          >
+            {getSpeedLabel()}
+          </motion.button>
+        </motion.div>
       )}
 
       {/* Mazo durante barajado y distribución */}

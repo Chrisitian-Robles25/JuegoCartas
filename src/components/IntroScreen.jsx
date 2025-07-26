@@ -1,9 +1,29 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
+import { useSoundEffects } from '../utils/sounds'
 
 const IntroScreen = ({ onStartGame }) => {
   const [question, setQuestion] = useState('')
   const [gameMode, setGameMode] = useState('auto') // 'auto' o 'manual'
+  
+  const { uiClick } = useSoundEffects()
+
+  // Activar sonidos automáticamente al cargar
+  useEffect(() => {
+    const initAudio = async () => {
+      try {
+        // Pequeño delay para asegurar que el componente esté montado
+        setTimeout(async () => {
+          await uiClick() // Activa el contexto de audio con un sonido silencioso
+          console.log('🎵 Audio activado automáticamente')
+        }, 500)
+      } catch (error) {
+        console.log('Audio no pudo activarse automáticamente:', error)
+      }
+    }
+    
+    initAudio()
+  }, [])
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -66,7 +86,6 @@ const IntroScreen = ({ onStartGame }) => {
       >
         <p>Bienvenido, buscador de verdades.</p>
         <p>Haz una pregunta al oráculo y permite que las cartas dancen para revelarte tu destino.</p>
-        <p>El antiguo ritual de las 52 cartas decidirá si la fortuna te sonríe.</p>
       </motion.div>
 
       {/* Selección de modo de juego */}
@@ -197,13 +216,12 @@ const IntroScreen = ({ onStartGame }) => {
         }}
       >
         <p style={{
-          fontSize: '16px',
-          opacity: 0.8,
+          fontSize: '14px',
+          opacity: 0.7,
           fontStyle: 'italic',
           color: 'var(--gold)'
         }}>
-          🔮 El ritual ancestral comenzará con el barajado de 52 cartas sagradas.<br />
-          Su distribución en 13 grupos revelará si los dioses del azar te favorecen.
+          🎵 Los sonidos místicos del oráculo están listos para acompañarte
         </p>
       </motion.div>
 
@@ -226,7 +244,6 @@ const IntroScreen = ({ onStartGame }) => {
           animate={{ y: [0, -10, 0] }}
           transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
         >
-          ✨ Haz tu pregunta y presiona Enter ✨
         </motion.div>
       </motion.div>
     </motion.div>
